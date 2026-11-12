@@ -73,6 +73,9 @@ public class Solution {
         }
 
 
+        sol.bandwidths = chooseBandwidths(sol, run);
+
+
 
 
 
@@ -132,7 +135,10 @@ public class Solution {
             if(traveltime>timetracker[id]){continue;}
 
 
-
+            boolean noCapacity = bandwidth[id] == 0;
+            if (noCapacity) {
+                continue;
+            }
             ArrayList<Integer> nextspots=this.graph.get(id);
             int cashmax= bandwidth[id];
 
@@ -169,6 +175,10 @@ public class Solution {
         ArrayList<int[]> waittime= new ArrayList<>();
         for (int idspot=0;idspot<totalwalk.size()-1;idspot++){
             int spot= totalwalk.get(idspot);
+            boolean needsCapacity = bandwidth[spot] == 0 && spot != graph.contentProvider;
+            if (needsCapacity) {
+                bandwidth[spot] = 1;
+            }
             int cashmax= bandwidth[spot];
 
 
@@ -196,6 +206,90 @@ public class Solution {
 
         return totalwalk;
 
+    }
+    private ArrayList<Integer> chooseBandwidths(SolutionObject base, runfeedback run) {
+        
+        SolutionObject trial = new SolutionObject();
+        trial.paths = base.paths;
+        trial.bandwidths = new ArrayList<>(base.bandwidths);
+        
+        HashMap<Integer, Integer> before = Simulator.run(graph, clients, base);
+
+        for (Client client : clients) {
+            boolean noComplaint = !complains(client, before);
+            if (noComplaint) {
+                
+                continue;
+            }
+            for (int[] wait : run.waitatnode.get(client.id)) {
+                int node = wait[0];
+                boolean canUpgrade = node != graph.contentProvider;
+                if (canUpgrade) {
+
+                    
+                    trial.bandwidths.set(node, base.bandwidths.get(node) + 3);
+                }
+            }
+        }
+
+        HashMap<Integer, Integer> after = Simulator.run(graph, clients, trial);
+        float original = netRevenue(base, before);
+        float upgraded = netRevenue(trial, after);
+        
+        boolean earnsMore = upgraded > original;
+        if (earnsMore) {
+            return trial.bandwidths;
+        }
+        return base.bandwidths;
+    }
+
+    private boolean complains(Client client, Map<Integer, Integer> delays) {
+        
+        int distance = info.shortestDelays.get(client.id);
+        return delays.get(client.id) > client.beta * distance;
+    }
+
+    public float legalPenalty(Map<Integer, Integer> delays) {
+        int allComplaints = 0;
+        int fccComplaints = 0;
+        int fccSize = 0;
+
+        
+        for (Client client : clients) {
+            boolean fcc = client.isFcc;
+            if (fcc) {
+                
+                fccSize++;
+            }
+            boolean complained = complains(client, delays);
+            if (complained) {
+                allComplaints++;
+            }
+            boolean fccComplaint = fcc && complained;
+            if (fccComplaint) {
+                fccComplaints++;
+            }
+        }
+        float lawsuit = penalty(allComplaints, clients.size(), info.rho1, info.lawsuit);
+        
+        float fccFine = penalty(fccComplaints, fccSize, info.rho2, info.fccFine);
+        return lawsuit + fccFine;
+    }
+
+    private float penalty(int count, int size, float ratio, float fine) {
+        int limit = (int) (ratio * size);
+        boolean fineDue = count >= limit;
+        if (fineDue) {
+            return -fine;
+        }
+        return 0;
+    }
+
+    private float netRevenue(SolutionObject plan, HashMap<Integer, Integer> delays) {
+
+        
+        float income = Revenue.revenue(info, plan, delays, false, false, true);
+        return income + legalPenalty(delays);
     }
 }
 
